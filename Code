@@ -1,0 +1,156 @@
+select * from CovidDeaths 
+where continent is not null order by 1, 2
+select * from CovidVaccinations order by 1, 2
+
+-- we found null dataset on continent so we shouldnt take these values
+
+--select the data we are going to use;
+
+select Location, date, total_cases, new_cases, total_deaths, population
+from CovidDeaths order by 1,2
+
+--looking at total cases VS total deaths..
+
+select Location, date, total_cases, total_deaths, 
+ROUND((total_deaths/total_cases)*100,3)  as DeathPercentage
+from CovidDeaths
+where location like '%states%' and continent is not null
+order by 1,2
+
+--now, we are looking at the total cases VS the population
+--it will show us what percentage of population got covid in US
+
+select Location, date, total_cases, population, 
+ROUND((total_cases/population)*100,3)  as CovidPercentage 
+from CovidDeaths
+where location like '%states%' and continent is not null
+order by 1,2
+
+--now we are looking at countries with the highest infection rate compared to population..
+
+select Location, population, MAX(total_cases) as Highest_Infected_count,
+MAX(total_cases/population)*100 as PercentageOfInfected_Population
+from CovidDeaths
+where continent is not null
+--where location like '%states%' 
+group by location,population
+order by PercentageOfInfected_Population desc
+
+
+--show the countries with the highest death count per population 
+
+select location, MAX(CAST(total_deaths as bigint)) as Total_Death_Count
+from CovidDeaths
+where continent is not null
+group by location 
+order by Total_Death_Count desc
+
+--but wait, there is something wrong .. lets check total_deaths 
+--total_deaths is varchar so we to have change to int. 
+--looks better, but instead of int we should use bigint such as this kind of dataset has many datas 
+--int use 2^32, bigint uses 2^64
+--there is still something wrong. check out the location.asia is not a country neither is world, add query where continent is not null everywhere.
+
+--show continents with the highest death count per population
+
+select continent, MAX(CAST(total_deaths as bigint)) as Total_Death_Count
+from CovidDeaths
+where continent is not null
+group by continent
+order by Total_Death_Count desc
+
+--lets check all new cases by date.
+
+select date, SUM(new_cases) as New_Cases, SUM(CAST(new_deaths as bigint)) as New_Deaths
+from CovidDeaths
+where continent is not null
+group by date
+order by 1,2
+
+--lets do percentage of new deaths based on new cases.
+
+select date, SUM(new_cases) as New_Cases, SUM(CAST(new_deaths as bigint)) as New_Deaths,
+ROUND(SUM(CAST(new_deaths as bigint))/SUM(new_cases)*100,3) as Death_Percentage
+from CovidDeaths
+where continent is not null and New_Cases<>0 and New_Deaths<>0
+group by date
+order by Death_Percentage desc
+
+--so we see that after vaccinations death percentages getting lower even cases getting even more than before
+-- feburary 20,24,22 in 2020 recorded the highest death percentages..
+
+
+--lets see total population and new vaccination by date. using joins
+
+select dea.continent, dea.location, dea.date,vac.new_vaccinations as New_Vaccinations 
+from CovidDeaths dea join CovidVaccinations vac
+on dea.location = vac.location and dea.date = vac.date -- here connecting 2 tables with 2 keys, namely location and date
+where dea.continent is not null
+order by 2,3
+
+
+-- this is for new vaccinations per day and i want to see for total vaccinations per day
+
+select dea.continent, dea.location, dea.date,dea.population,vac.new_vaccinations as New_Vaccinations,
+SUM(CONVERT(bigint, vac.new_vaccinations )) over 
+(partition by dea.location order by dea.location, dea.date) as total_Vaccinations
+from CovidDeaths dea join CovidVaccinations vac
+on dea.location = vac.location and dea.date = vac.date -- here connecting 2 tables with 2 keys, namely location and date
+where dea.continent is not null
+order by 2,3
+
+-- now after new vaccinations total vac = new vacc + new day vac.
+
+-- i want to see percentage of new vaccby population 
+-- i will create CTE for that 
+
+--1st way with CTE
+
+with popVSvac (continent, location, date, population, new_vaccination, total_Vaccinations)
+as 
+(
+select dea.continent, dea.location, dea.date,dea.population,vac.new_vaccinations as New_Vaccinations,
+SUM(CONVERT(bigint, vac.new_vaccinations )) over 
+(partition by dea.location order by dea.location, dea.date) as total_Vaccinations
+from CovidDeaths dea join CovidVaccinations vac
+on dea.location = vac.location and dea.date = vac.date -- here connecting 2 tables with 2 keys, namely location and date
+where dea.continent is not null
+)
+select *, ROUND((total_Vaccinations/population)*100, 3)as vaccPercentage 
+from popVSvac
+
+
+--i can do something using with TEMP table 
+CREATE TABLE #vacc_percentage
+(
+continent nvarchar(255),
+location nvarchar(255),
+date datetime,
+population numeric,
+new_vaccinations numeric,
+total_Vaccinations numeric
+)
+INSERT INTO #vacc_percentage
+
+select dea.continent, dea.location, dea.date,dea.population,vac.new_vaccinations as New_Vaccinations,
+SUM(CONVERT(bigint, vac.new_vaccinations )) over 
+(partition by dea.location order by dea.location, dea.date) as total_Vaccinations
+from CovidDeaths dea join CovidVaccinations vac
+on dea.location = vac.location and dea.date = vac.date -- here connecting 2 tables with 2 keys, namely location and date
+where dea.continent is not null
+
+select *, ROUND((total_Vaccinations/population)*100, 3)as vaccPercentage 
+from #vacc_percentage
+
+--i will create view to sorter data for later visualizations ..
+
+CREATE VIEW Percentage_Population_vaccinated AS 
+select dea.continent, dea.location, dea.date,dea.population,vac.new_vaccinations as New_Vaccinations,
+SUM(CONVERT(bigint, vac.new_vaccinations )) over 
+(partition by dea.location order by dea.location, dea.date) as total_Vaccinations
+from CovidDeaths dea join CovidVaccinations vac
+on dea.location = vac.location and dea.date = vac.date -- here connecting 2 tables with 2 keys, namely location and date
+where dea.continent is not null
+order by 2,3
+
+SELECT * from Percentage_Population_vaccinated
